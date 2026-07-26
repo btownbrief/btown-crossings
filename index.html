@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#14201b">
+<title>BTOWN CROSSINGS — word tiles, Burlington style</title>
+<meta name="description" content="An original crossword-building board game from Burlington, Vermont. Double your word on Church Street, triple a letter on the Waterfront. Pass the phone or take on SKIP. A Btown Games production from the BTown Brief.">
+<meta property="og:type" content="website">
+<meta property="og:title" content="BTOWN CROSSINGS">
+<meta property="og:description" content="Build words across Burlington — Church Street doubles them, the Intervale triples them. Pass the phone around the table or take on SKIP the Skipper.">
+<meta property="og:url" content="https://play.btownbrief.com/btown-crossings/">
+<meta property="og:image" content="https://play.btownbrief.com/btown-crossings/icon-180.png">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+
+  <!-- Title screen -->
+  <div id="menu" class="screen">
+    <div class="menu-inner">
+      <div id="logo" aria-label="Btown Crossings">
+        <span class="l-btown">BTOWN</span>
+        <span class="l-crossings"><i>C</i><i>R</i><i>O</i><i>S</i><i>S</i><i>I</i><i>N</i><i>G</i><i>S</i></span>
+        <span class="l-sub">🍁 word tiles, Burlington style 🍁</span>
+      </div>
+      <div id="tagline">Every word starts at City Hall Park.<br>Double it on Church Street.</div>
+
+      <button id="resumeBtn" class="big-btn hidden">↩&nbsp; BACK TO THE BOARD</button>
+      <button id="botBtn" class="big-btn">⛵&nbsp; TAKE ON SKIP</button>
+
+      <div id="passSetup">
+        <button id="passBtn" class="mode-btn">📱 PASS &amp; PLAY</button>
+        <div id="countRow" class="hidden">
+          <span class="count-label">HOW MANY AT THE TABLE?</span>
+          <div class="count-btns">
+            <button class="count-btn" data-n="2">2</button>
+            <button class="count-btn" data-n="3">3</button>
+            <button class="count-btn" data-n="4">4</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="howto">
+        <div class="howto-line"><span class="key">DRAG TILES</span> from your rack to the board</div>
+        <div class="howto-line"><span class="key">ALL 7 AT ONCE</span> = the 40-point Full Bucket</div>
+      </div>
+    </div>
+    <footer id="credit">
+      A Btown Games production · <a href="https://www.btownbrief.com" target="_blank" rel="noopener">Read the BTown Brief →</a>
+    </footer>
+  </div>
+
+  <!-- Pass-the-phone interstitial -->
+  <div id="handoff" class="screen hidden">
+    <div class="menu-inner">
+      <div class="handoff-card">
+        <div class="handoff-emoji">🤝</div>
+        <div id="handoffTitle">Pass the phone to Player 2</div>
+        <div id="handoffLast" class="handoff-last"></div>
+        <div class="handoff-sub">No peeking — it's a small town, word gets around.</div>
+        <button id="handoffBtn" class="big-btn">👀&nbsp; SHOW MY RACK</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Game -->
+  <div id="game" class="hidden">
+    <div id="topbar">
+      <button id="homeBtn" class="icon-btn" aria-label="Back to menu">🏠</button>
+      <div id="scoreChips"></div>
+      <button id="helpBtn" class="icon-btn" aria-label="How to play">?</button>
+    </div>
+
+    <div id="boardWrap">
+      <div id="board" aria-label="15 by 15 board"></div>
+    </div>
+
+    <div id="msg"></div>
+
+    <div id="controls">
+      <button id="shuffleBtn" class="ctl" aria-label="Shuffle rack">🔀</button>
+      <button id="swapBtn" class="ctl">SWAP</button>
+      <button id="passTurnBtn" class="ctl">PASS</button>
+      <button id="recallBtn" class="ctl hidden">↩</button>
+      <button id="playBtn" class="ctl play" disabled>PLAY</button>
+    </div>
+
+    <div id="rackArea">
+      <div id="rack"></div>
+    </div>
+  </div>
+
+  <!-- blank tile letter picker -->
+  <div id="blankPicker" class="overlay hidden">
+    <div class="picker-card">
+      <div class="picker-title">A blank plays as any letter (worth 0):</div>
+      <div id="blankGrid"></div>
+    </div>
+  </div>
+
+  <!-- swap tiles -->
+  <div id="swapOverlay" class="overlay hidden">
+    <div class="picker-card">
+      <div class="picker-title">Tap tiles to trade back into the bag:</div>
+      <div id="swapTiles"></div>
+      <div class="picker-row">
+        <button id="swapCancelBtn" class="chip-btn">CANCEL</button>
+        <button id="swapGoBtn" class="chip-btn go" disabled>SWAP &amp; END TURN</button>
+      </div>
+      <div id="swapNote" class="picker-note"></div>
+    </div>
+  </div>
+
+  <!-- how to play -->
+  <div id="helpOverlay" class="overlay hidden">
+    <div class="picker-card help-card">
+      <div class="picker-title">HOW TO PLAY</div>
+      <div class="help-body">
+        <p>Build one word per turn in a straight line, crossing what's already
+        down. The first word must cover <strong>City Hall Park ⭐</strong> in
+        the middle. Every run of letters it creates must be a real word — the
+        board checks as you go.</p>
+        <p>Can't play? <strong>SWAP</strong> tiles (that's your turn) or
+        <strong>PASS</strong>. Use all 7 tiles in one turn for the
+        <strong>Full Bucket: +40</strong>.</p>
+        <div class="legend">
+          <div><span class="lg sq-2L"></span> <strong>North Beach</strong> — letter ×2</div>
+          <div><span class="lg sq-3L"></span> <strong>Waterfront</strong> — letter ×3</div>
+          <div><span class="lg sq-2W"></span> <strong>Church Street</strong> — word ×2</div>
+          <div><span class="lg sq-3W"></span> <strong>the Intervale</strong> — word ×3</div>
+        </div>
+        <p class="help-fine">Premium squares pay out only on the turn they're
+        first covered. Game ends when the bag is empty and someone plays their
+        last tile (they collect everyone's leftover tile points) — or after two
+        full rounds of passes. High score wins.</p>
+      </div>
+      <button class="chip-btn" data-close>GOT IT</button>
+    </div>
+  </div>
+
+  <!-- Game over -->
+  <div id="gameover" class="screen hidden">
+    <div class="menu-inner">
+      <div id="go-card">
+        <div id="go-title"></div>
+        <div id="go-line"></div>
+        <div id="go-table"></div>
+        <div id="go-btns">
+          <button id="againBtn" class="big-btn">↻&nbsp; RUN IT BACK</button>
+          <button id="menuBtn" class="chip-btn">🏠&nbsp; MENU</button>
+        </div>
+        <a id="brief-cta" href="https://www.btownbrief.com" target="_blank" rel="noopener">
+          🗞️ The best words in town are in your inbox.<br><strong>Read the BTown Brief →</strong>
+        </a>
+      </div>
+    </div>
+  </div>
+
+</div>
+<script type="module" src="js/main.js"></script>
+</body>
+</html>

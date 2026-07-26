@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <rect width="100" height="100" rx="22" fill="#14201b"/>
+  <!-- crossing premium squares -->
+  <rect x="10" y="10" width="24" height="24" rx="5" fill="#8f3e34"/>
+  <rect x="66" y="66" width="24" height="24" rx="5" fill="#2e7d46"/>
+  <rect x="66" y="10" width="24" height="24" rx="5" fill="#2e6f8f"/>
+  <!-- two crossing letter tiles: B across, T down -->
+  <rect x="22" y="38" width="34" height="34" rx="7" fill="#f2d9a6" stroke="#c9a468" stroke-width="3"/>
+  <text x="39" y="63" font-family="Helvetica, Arial, sans-serif" font-size="26" font-weight="900" fill="#3a2413" text-anchor="middle">B</text>
+  <rect x="48" y="30" width="34" height="34" rx="7" fill="#f2d9a6" stroke="#c9a468" stroke-width="3"/>
+  <rect x="48" y="58" width="34" height="6" rx="3" fill="#c9a468"/>
+  <text x="65" y="55" font-family="Helvetica, Arial, sans-serif" font-size="26" font-weight="900" fill="#3a2413" text-anchor="middle">T</text>
+  <!-- maple leaf tucked over the corner -->
+  <g transform="translate(8 62) scale(0.52)">
+    <path d="M28 2 L33 14 L44 8 L40 22 L54 20 L44 32 L56 38 L42 42 L48 54 L34 48 L32 62 L24 50 L12 58 L16 42 L2 44 L12 32 L2 24 L16 22 L10 8 L23 14 Z" fill="#e8912d" stroke="#b06e14" stroke-width="2.5" stroke-linejoin="round"/>
+    <line x1="28" y1="34" x2="26" y2="66" stroke="#b06e14" stroke-width="3" stroke-linecap="round"/>
+  </g>
+</svg>
