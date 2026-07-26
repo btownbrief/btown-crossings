@@ -192,8 +192,11 @@ function leftoverValue(rack) {
 export function checkPlacement(state, move, isWord) {
   if (state.gameOver) throw new Error('The game is over.');
   if (typeof isWord !== 'function') throw new Error('checkPlacement needs an isWord function');
-  const tiles = move.tiles;
-  if (!Array.isArray(tiles) || tiles.length === 0) throw new Error('Place at least one tile.');
+  if (!Array.isArray(move.tiles) || move.tiles.length === 0) throw new Error('Place at least one tile.');
+  // Normalize blank to a strict boolean up front so validation, the rack
+  // check, scoring, and persistence all read the same tile the same way
+  // (a truthy blank like 1 must behave exactly like true).
+  const tiles = move.tiles.map((t) => ({ ...t, blank: Boolean(t && t.blank) }));
   if (tiles.length > RACK_SIZE) throw new Error('Too many tiles.');
 
   const seen = new Set();
@@ -333,14 +336,17 @@ export function applyMove(state, move, isWord) {
 
 function applyPlace(state, move, isWord) {
   const result = checkPlacement(state, move, isWord); // throws if invalid
+  // Same blank normalization checkPlacement applied — the tile that
+  // validated and scored as a blank must persist as a blank.
+  const tiles = move.tiles.map((t) => ({ ...t, blank: Boolean(t && t.blank) }));
   const player = state.currentPlayer;
 
   const board = state.board.slice();
-  for (const t of move.tiles) {
-    board[idx(t.row, t.col)] = { letter: t.letter, blank: t.blank === true };
+  for (const t of tiles) {
+    board[idx(t.row, t.col)] = { letter: t.letter, blank: t.blank };
   }
 
-  const needed = move.tiles.map((t) => (t.blank ? BLANK : t.letter));
+  const needed = tiles.map((t) => (t.blank ? BLANK : t.letter));
   let rack = rackWithout(state.racks[player], needed);
   const bag = state.bag.slice();
   while (rack.length < RACK_SIZE && bag.length > 0) rack.push(bag.pop());
@@ -360,7 +366,7 @@ function applyPlace(state, move, isWord) {
     lastMove: {
       player,
       type: 'place',
-      cells: move.tiles.map((t) => idx(t.row, t.col)),
+      cells: tiles.map((t) => idx(t.row, t.col)),
       words: result.words.map((w) => ({ word: w.word, score: w.score })),
       score: result.score,
       fullBucket: result.fullBucket,

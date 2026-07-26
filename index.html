@@ -14,6 +14,8 @@
 <meta property="og:description" content="Build words across Burlington — Church Street doubles them, the Intervale triples them. Pass the phone around the table or take on SKIP the Skipper.">
 <meta property="og:url" content="https://play.btownbrief.com/btown-crossings/">
 <meta property="og:image" content="https://play.btownbrief.com/btown-crossings/icon-180.png">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="https://play.btownbrief.com/btown-crossings/icon-180.png">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="icon-180.png">
 <link rel="manifest" href="manifest.webmanifest">
@@ -53,7 +55,7 @@
       </div>
     </div>
     <footer id="credit">
-      A Btown Games production · <a href="https://www.btownbrief.com" target="_blank" rel="noopener">Read the BTown Brief →</a>
+      A Btown Games production · <a href="https://play.btownbrief.com/" target="_blank" rel="noopener">More games →</a> · <a href="https://www.btownbrief.com" target="_blank" rel="noopener">Read the BTown Brief →</a>
     </footer>
   </div>
 
@@ -142,6 +144,16 @@
         full rounds of passes. High score wins.</p>
       </div>
       <button class="chip-btn" data-close>GOT IT</button>
+    </div>
+  </div>
+
+  <!-- dictionary failed to load -->
+  <div id="dictOverlay" class="overlay hidden">
+    <div class="picker-card">
+      <div class="picker-title">THE DICTIONARY DIDN'T MAKE IT</div>
+      <div class="picker-note">Words can't be checked without it — probably a
+      connection hiccup. Get back online and try again.</div>
+      <button id="dictRetryBtn" class="chip-btn go">↻&nbsp; TRY AGAIN</button>
     </div>
   </div>
 

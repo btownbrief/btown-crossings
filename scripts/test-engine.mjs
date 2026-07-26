@@ -204,6 +204,28 @@ function allTiles(state) {
     'blank survives serialization');
 }
 
+/* ------------------------------- blank truthiness is normalized everywhere */
+{
+  // A move sent with blank: 1 (truthy, not true) must behave byte-identically
+  // to blank: true — in validation, scoring, AND the persisted board cell.
+  // Regression: persistence once used `t.blank === true` while validation and
+  // scoring used truthiness, so a blank: 1 tile validated and scored as a
+  // blank but landed on the board as a full-value letter.
+  const s = withBoard(
+    fixture({ racks: [[BLANK, 'A', 'T', 'R', 'E', 'S', 'O'], ['A', 'A', 'A', 'A', 'A', 'A', 'A']] }),
+    [[7, 6, 'C'], [7, 7, 'A'], [7, 8, 'T']],
+  );
+  const truthy = { type: 'place', tiles: [{ row: 7, col: 9, letter: 'S', blank: 1 }] };
+  const strict = { type: 'place', tiles: [{ row: 7, col: 9, letter: 'S', blank: true }] };
+  assert(JSON.stringify(checkPlacement(s, truthy, isWord)) === JSON.stringify(checkPlacement(s, strict, isWord)),
+    'blank: 1 validates and scores exactly like blank: true (0 points for the tile)');
+  const afterTruthy = applyMove(s, truthy, isWord);
+  assert(afterTruthy.board[idx(7, 9)].blank === true && afterTruthy.board[idx(7, 9)].letter === 'S',
+    'blank: 1 persists on the board as a real blank');
+  assert(JSON.stringify(afterTruthy) === JSON.stringify(applyMove(s, strict, isWord)),
+    'blank: 1 and blank: true produce byte-identical next states');
+}
+
 /* ------------------------------------------------------------ exchange */
 {
   const s = fixture();

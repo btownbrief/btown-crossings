@@ -380,6 +380,77 @@ button { font-family: inherit; cursor: pointer; }
 }
 .drag-ghost.blank-tile { color: #7a5c9e; }
 
+/* magnified preview of the drag target cell, floating above the ghost */
+#dragLoupe {
+  position: fixed;
+  z-index: 60;
+  pointer-events: none;
+  transform: translate(-50%, -100%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+.loupe-sq {
+  width: 58px;
+  height: 58px;
+  border-radius: 8px;
+  background: var(--cell);
+  border: 2px solid var(--border);
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.loupe-sq.sq-2L { background: var(--sq-2L); }
+.loupe-sq.sq-3L { background: var(--sq-3L); }
+.loupe-sq.sq-2W { background: var(--sq-2W); }
+.loupe-sq.sq-3W { background: var(--sq-3W); }
+.loupe-sq.ctr { background: var(--panel-2); }
+.loupe-letter {
+  width: 46px;
+  height: 46px;
+  border-radius: 6px;
+  background: var(--tile-bg);
+  border: 1px solid var(--tile-edge);
+  color: var(--tile-ink);
+  font-size: 26px;
+  font-weight: 900;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.loupe-letter.blank-tile { color: #7a5c9e; }
+.loupe-tag {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  color: var(--text);
+  background: rgba(0, 0, 0, 0.55);
+  padding: 2px 9px;
+  border-radius: 999px;
+}
+
+/* premium square name card (press an uncovered premium square) */
+#premTip {
+  position: fixed;
+  z-index: 60;
+  pointer-events: none;
+  transform: translate(-50%, -100%);
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 7px 12px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 12.5px;
+  color: var(--muted);
+  white-space: nowrap;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.45);
+}
+#premTip b { color: var(--text); }
+
 /* ---------------- overlays ---------------- */
 .overlay {
   position: fixed;

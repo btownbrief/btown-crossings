@@ -6,7 +6,7 @@
 
 import {
   createInitialState, checkPlacement, applyMove, getStatus,
-  BOARD_SIZE, CENTER, BLANK, TILE_POINTS, PREMIUMS, idx,
+  BOARD_SIZE, CENTER, BLANK, TILE_POINTS, PREMIUMS, PREMIUM_INFO, idx,
 } from './engine.js';
 import { buildLexicon, chooseMove } from './bot.js';
 
@@ -248,6 +248,32 @@ function cellFree(row, col) {
   return G.state.board[k] === null && !pending.some((p) => idx(p.row, p.col) === k);
 }
 
+/* Drag loupe: 24px cells hide under a fingertip, so while a drag is over the
+ * board a magnified preview of the target cell (and its coordinate) floats
+ * above the lifted ghost. Tap-to-place never shows it. */
+const loupe = document.createElement('div');
+loupe.id = 'dragLoupe';
+loupe.className = 'hidden';
+loupe.innerHTML = '<div class="loupe-sq"><span class="loupe-letter"></span></div><div class="loupe-tag"></div>';
+document.body.appendChild(loupe);
+
+function updateLoupe(e) {
+  if (!drag?.cell) { loupe.classList.add('hidden'); return; }
+  const { row, col } = drag.cell;
+  const k = idx(row, col);
+  const prem = PREMIUMS[k];
+  const sq = loupe.querySelector('.loupe-sq');
+  sq.className = 'loupe-sq' + (prem ? ' sq-' + prem : k === CENTER ? ' ctr' : '');
+  const letterEl = loupe.querySelector('.loupe-letter');
+  letterEl.textContent = drag.letter;
+  letterEl.classList.toggle('blank-tile', drag.slot.letter === BLANK);
+  loupe.querySelector('.loupe-tag').textContent =
+    String.fromCharCode(65 + col) + (row + 1) + (prem ? ' · ' + prem : k === CENTER ? ' · ⭐' : '');
+  loupe.style.left = `${Math.min(Math.max(e.clientX, 46), window.innerWidth - 46)}px`;
+  loupe.style.top = `${e.clientY - drag.lift - 34}px`;
+  loupe.classList.remove('hidden');
+}
+
 function startDrag(e, el, source) {
   if (!humanTurn() || drag || G.state.gameOver) return;
   e.preventDefault();
@@ -259,7 +285,7 @@ function startDrag(e, el, source) {
   ghost.className = 'drag-ghost' + (slot.letter === BLANK ? ' blank-tile' : '');
   ghost.textContent = letter;
   drag = {
-    source, el, ghost, slot,
+    source, el, ghost, slot, letter,
     lift: e.pointerType === 'touch' ? 54 : 8,
     startX: e.clientX, startY: e.clientY, moved: false,
   };
@@ -283,12 +309,14 @@ function onDragMove(e) {
   const cell = boardCellAt(e.clientX, e.clientY - drag.lift);
   drag.cell = cell && cellFree(cell.row, cell.col) ? cell : null;
   if (drag.cell) cellEls[idx(drag.cell.row, drag.cell.col)].classList.add('drop-ok');
+  updateLoupe(e);
 }
 
 function endDragCleanup() {
   drag.ghost.remove();
   drag.el.classList.remove('ghosted');
   cellEls.forEach((c) => c.classList.remove('drop-ok'));
+  loupe.classList.add('hidden');
   drag = null;
 }
 
@@ -344,6 +372,46 @@ $('board').addEventListener('click', (e) => {
   if (!humanTurn() || !selectedSlot) return;
   const cell = boardCellAt(e.clientX, e.clientY);
   if (cell && cellFree(cell.row, cell.col)) placeFromRack(selectedSlot, cell.row, cell.col);
+});
+
+/* Premium tooltip: press an uncovered premium square when you're NOT
+ * mid-placement and a small card names it, Burlington style
+ * (e.g. "Waterfront · letter ×3"). Auto-dismisses, or tap anywhere. */
+const premTip = document.createElement('div');
+premTip.id = 'premTip';
+premTip.className = 'hidden';
+premTip.innerHTML = '<span class="lg"></span><b></b><span></span>';
+document.body.appendChild(premTip);
+let premTipTimer = null;
+let premTipEvent = null; // the press that opened it must not also dismiss it
+
+function hidePremTip() {
+  clearTimeout(premTipTimer);
+  premTip.classList.add('hidden');
+}
+
+$('board').addEventListener('pointerdown', (e) => {
+  if (drag || selectedSlot || pending.length > 0) return; // mid-placement: presses place tiles
+  if (e.target.closest('.btile')) return; // tile presses run the drag/tap flow
+  const cell = boardCellAt(e.clientX, e.clientY);
+  if (!cell) return;
+  const k = idx(cell.row, cell.col);
+  const type = PREMIUMS[k];
+  if (!type || G.state.board[k] !== null) return;
+  premTip.children[0].className = 'lg sq-' + type;
+  premTip.children[1].textContent = PREMIUM_INFO[type].name;
+  premTip.children[2].textContent = ` · ${type[1] === 'L' ? 'letter' : 'word'} ×${type[0]}`;
+  const rect = cellEls[k].getBoundingClientRect();
+  premTip.style.left = `${Math.min(Math.max(rect.left + rect.width / 2, 80), window.innerWidth - 80)}px`;
+  premTip.style.top = `${rect.top - 6}px`;
+  premTip.classList.remove('hidden');
+  premTipEvent = e;
+  clearTimeout(premTipTimer);
+  premTipTimer = setTimeout(hidePremTip, 2000);
+});
+
+document.addEventListener('pointerdown', (e) => {
+  if (e !== premTipEvent) hidePremTip();
 });
 
 /* ---------------------------------------------------------------- blank picker */
@@ -595,6 +663,7 @@ $('againBtn').addEventListener('click', () => startGame(G.mode, G.state.numPlaye
 $('helpBtn').addEventListener('click', () => $('helpOverlay').classList.remove('hidden'));
 
 document.querySelectorAll('.overlay').forEach((ov) => {
+  if (ov.id === 'dictOverlay') return; // only its TRY AGAIN button closes it
   ov.addEventListener('click', (e) => {
     if (e.target !== ov) return;
     if (ov.id === 'blankPicker') pendingBlankDrop = null;
@@ -606,13 +675,20 @@ document.querySelectorAll('.overlay').forEach((ov) => {
 /* ---------------------------------------------------------------- boot */
 
 goMenu();
-fetch('data/words.txt')
-  .then((res) => res.text())
-  .then((text) => {
-    dict = new Set(text.split('\n').map((w) => w.trim()).filter(Boolean));
-    if (G) renderStatus();
-  })
-  .catch(() => {
-    $('msg').className = 'bad';
-    $('msg').textContent = 'Could not load the dictionary — check your connection and reload.';
-  });
+
+function loadDictionary() {
+  $('dictOverlay').classList.add('hidden');
+  fetch('data/words.txt')
+    .then((res) => {
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      return res.text();
+    })
+    .then((text) => {
+      dict = new Set(text.split('\n').map((w) => w.trim()).filter(Boolean));
+      if (G) renderStatus();
+    })
+    .catch(() => $('dictOverlay').classList.remove('hidden'));
+}
+
+$('dictRetryBtn').addEventListener('click', loadDictionary);
+loadDictionary();
