@@ -243,9 +243,13 @@ function boardCellAt(clientX, clientY) {
   return { row, col };
 }
 
-function cellFree(row, col) {
+/* `ignore` is the pending tile being moved — the square it currently sits on
+ * counts as free for it, so dropping it back where it started is a no-op
+ * instead of shipping it to the rack. */
+function cellFree(row, col, ignore) {
   const k = idx(row, col);
-  return G.state.board[k] === null && !pending.some((p) => idx(p.row, p.col) === k);
+  return G.state.board[k] === null &&
+    !pending.some((p) => p !== ignore && idx(p.row, p.col) === k);
 }
 
 /* Drag loupe: 24px cells hide under a fingertip, so while a drag is over the
@@ -275,7 +279,10 @@ function updateLoupe(e) {
 }
 
 function startDrag(e, el, source) {
-  if (!humanTurn() || drag || G.state.gameOver) return;
+  // A previous gesture that never got its pointerup would leave `drag` set
+  // and freeze every tile on the board. Clear it and carry on.
+  if (drag) endDragCleanup();
+  if (!humanTurn() || G.state.gameOver) return;
   e.preventDefault();
   const slot = source.type === 'rack' ? source.slot : source.pend.slot;
   const letter = source.type === 'rack'
@@ -286,18 +293,30 @@ function startDrag(e, el, source) {
   ghost.textContent = letter;
   drag = {
     source, el, ghost, slot, letter,
+    pointerId: e.pointerId,
+    prevSelected: selectedSlot,
     lift: e.pointerType === 'touch' ? 54 : 8,
     startX: e.clientX, startY: e.clientY, moved: false,
   };
+  selectedSlot = null; // a drag must not also fire the tap-to-place click
   el.classList.add('ghosted');
-  try { el.setPointerCapture(e.pointerId); } catch { /* stale pointer — element events still fire */ }
-  el.addEventListener('pointermove', onDragMove);
-  el.addEventListener('pointerup', onDragEnd);
-  el.addEventListener('pointercancel', onDragCancel);
+  try { el.setPointerCapture(e.pointerId); } catch { /* capture is a nicety, not the contract */ }
+  // The rest of the gesture is tracked on the window, never on the tile.
+  // Tiles are torn down and rebuilt by every render, and pointer capture can
+  // fail or be released mid-drag — either way the tile stops receiving events
+  // and a tile-bound pointerup would never arrive, hanging the board.
+  window.addEventListener('pointermove', onDragMove);
+  window.addEventListener('pointerup', onDragEnd);
+  window.addEventListener('pointercancel', onDragCancel);
+}
+
+/* Ignore the other fingers: one pointer owns the drag from down to up. */
+function isDragPointer(e) {
+  return drag !== null && e.pointerId === drag.pointerId;
 }
 
 function onDragMove(e) {
-  if (!drag) return;
+  if (!isDragPointer(e)) return;
   if (!drag.moved) {
     if (Math.hypot(e.clientX - drag.startX, e.clientY - drag.startY) < 7) return;
     drag.moved = true;
@@ -307,12 +326,16 @@ function onDragMove(e) {
   drag.ghost.style.top = `${e.clientY - 26 - drag.lift}px`;
   cellEls.forEach((c) => c.classList.remove('drop-ok'));
   const cell = boardCellAt(e.clientX, e.clientY - drag.lift);
-  drag.cell = cell && cellFree(cell.row, cell.col) ? cell : null;
+  const self = drag.source.type === 'pending' ? drag.source.pend : null;
+  drag.cell = cell && cellFree(cell.row, cell.col, self) ? cell : null;
   if (drag.cell) cellEls[idx(drag.cell.row, drag.cell.col)].classList.add('drop-ok');
   updateLoupe(e);
 }
 
 function endDragCleanup() {
+  window.removeEventListener('pointermove', onDragMove);
+  window.removeEventListener('pointerup', onDragEnd);
+  window.removeEventListener('pointercancel', onDragCancel);
   drag.ghost.remove();
   drag.el.classList.remove('ghosted');
   cellEls.forEach((c) => c.classList.remove('drop-ok'));
@@ -320,22 +343,22 @@ function endDragCleanup() {
   drag = null;
 }
 
-function onDragCancel() {
-  if (!drag) return;
+function onDragCancel(e) {
+  if (!isDragPointer(e)) return;
   endDragCleanup();
   render();
 }
 
 function onDragEnd(e) {
-  if (!drag) return;
-  const { source, slot, cell, moved } = drag;
+  if (!isDragPointer(e)) return;
+  const { source, slot, cell, moved, prevSelected } = drag;
   endDragCleanup();
 
   if (!moved) { // a tap
     if (source.type === 'pending') {
       pending = pending.filter((p) => p !== source.pend); // tap a placed tile: take it back
     } else {
-      selectedSlot = selectedSlot === slot ? null : slot; // arm/disarm tap-to-place
+      selectedSlot = prevSelected === slot ? null : slot; // arm/disarm tap-to-place
     }
     render();
     return;
