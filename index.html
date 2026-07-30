@@ -49,6 +49,21 @@
         </div>
       </div>
 
+      <div id="onlinePlay">
+        <div class="online-label">or cross words with a friend — any two phones</div>
+        <div id="onlineRow">
+          <button class="mode-btn" id="hostBtn">
+            <span class="online-name">🍁 START A TABLE</span>
+            <span class="online-blurb">get a code for your friend</span>
+          </button>
+          <button class="mode-btn" id="joinBtn">
+            <span class="online-name">🔑 JOIN A TABLE</span>
+            <span class="online-blurb">bring the code they sent</span>
+          </button>
+        </div>
+        <button id="rejoinBtn" class="chip-btn hidden"></button>
+      </div>
+
       <div id="howto">
         <div class="howto-line"><span class="key">DRAG TILES</span> from your rack to the board</div>
         <div class="howto-line"><span class="key">ALL 7 AT ONCE</span> = the 40-point Full Bucket</div>
@@ -57,6 +72,34 @@
     <footer id="credit">
       A Btown Games production · <a href="https://play.btownbrief.com/" target="_blank" rel="noopener">More games →</a> · <a href="https://www.btownbrief.com" target="_blank" rel="noopener">Read the BTown Brief →</a>
     </footer>
+  </div>
+
+  <!-- Online setup: name (+ code when joining) -->
+  <div id="onlinePanel" class="overlay hidden">
+    <div class="op-card">
+      <div id="opTitle" class="op-title">START A TABLE</div>
+      <label class="op-label" for="opName">YOUR NAME</label>
+      <input id="opName" maxlength="24" autocomplete="nickname" placeholder="Wordsmith">
+      <div id="opCodeWrap" class="hidden">
+        <label class="op-label" for="opCode">TABLE CODE</label>
+        <input id="opCode" maxlength="4" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="ABCD">
+      </div>
+      <div id="opError" class="op-error hidden"></div>
+      <div class="op-btns">
+        <button id="opCancel" class="chip-btn">BACK</button>
+        <button id="opGo" class="big-btn">GET A CODE</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Lobby: show the table code while we wait for the friend -->
+  <div id="lobby" class="overlay hidden">
+    <div class="op-card">
+      <div class="op-title">READ THIS CODE TO YOUR FRIEND</div>
+      <div id="lobbyCode"></div>
+      <div id="lobbyHint">they open this game, tap <b>JOIN A TABLE</b>, and type it in</div>
+      <div class="op-btns"><button id="lobbyCancel" class="chip-btn">PACK UP THE TILES</button></div>
+    </div>
   </div>
 
   <!-- Pass-the-phone interstitial -->

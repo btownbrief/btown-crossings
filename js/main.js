@@ -9,16 +9,27 @@ import {
   BOARD_SIZE, CENTER, BLANK, TILE_POINTS, PREMIUMS, PREMIUM_INFO, idx,
 } from './engine.js';
 import { buildLexicon, chooseMove } from './bot.js';
+import { OnlineMatch, savedSession, clearSession, getName } from './rooms.js';
 
 const SAVE_KEY = 'btown-crossings-save-v1';
+const GAME = 'btown-crossings';
 const BOT = 1; // in bot mode, player 0 is the human, player 1 is SKIP
 
 const $ = (id) => document.getElementById(id);
 const screens = { menu: $('menu'), handoff: $('handoff'), game: $('game'), gameover: $('gameover') };
+const onlinePanel = $('onlinePanel');
+const opTitle = $('opTitle');
+const opName = $('opName');
+const opCodeWrap = $('opCodeWrap');
+const opCode = $('opCode');
+const opError = $('opError');
+const lobbyEl = $('lobby');
+const lobbyCode = $('lobbyCode');
+const rejoinBtn = $('rejoinBtn');
 
 let dict = null;      // Set of lowercase words
 let lexicon = null;   // bot brain, built on first bot game
-let G = null;         // { mode: 'bot' | 'pass', state }
+let G = null;         // { mode: 'bot' | 'pass' | 'online', state }
 let rackView = [];    // [{ letter }] — this turn's rack, in display order
 let pending = [];     // [{ slot, letter, as, blank, row, col }] — uncommitted tiles
 let handRevealed = true;
@@ -27,17 +38,33 @@ let pendingBlankDrop = null; // { slot, row, col } waiting on the letter picker
 let botTimer = null;
 let passArmed = false;
 let cellEls = [];
+let online = null;    // { match, myPlayer } while seated at an online table
+let onlineAbandoned = false;
+let panelIntent = 'host';
+let pollErrors = 0;
 
 const newSeed = () => (Math.random() * 2 ** 31) | 0;
 const isWord = (w) => dict !== null && dict.has(w);
 
 function playerName(p) {
   if (G.mode === 'bot') return p === BOT ? 'SKIP' : 'You';
+  if (G.mode === 'online') {
+    if (p === online?.myPlayer) return 'You';
+    return online?.match.opponents().find((opp) => opp.seat === p)?.name || 'Your friend';
+  }
   return 'Player ' + (p + 1);
 }
 
 function humanTurn() {
-  return G && !G.state.gameOver && !(G.mode === 'bot' && G.state.currentPlayer === BOT);
+  if (!G || G.state.gameOver) return false;
+  if (G.mode === 'bot') return G.state.currentPlayer !== BOT;
+  if (G.mode === 'online') {
+    return online !== null &&
+      G.state.currentPlayer === online.myPlayer &&
+      online.match.status === 'playing' &&
+      !onlineAbandoned;
+  }
+  return true;
 }
 
 function show(name) {
@@ -48,6 +75,7 @@ function show(name) {
 
 function save() {
   try {
+    if (G?.mode === 'online') return; // rooms.js owns online resume
     if (G && !G.state.gameOver) localStorage.setItem(SAVE_KEY, JSON.stringify({ mode: G.mode, state: G.state }));
     else localStorage.removeItem(SAVE_KEY);
   } catch { /* private mode etc. — play on without saving */ }
@@ -118,9 +146,12 @@ function renderBoard(fx = {}) {
 function syncRack() {
   pending = [];
   selectedSlot = null;
-  rackView = humanTurn() || G.mode === 'pass'
-    ? G.state.racks[G.state.currentPlayer].map((letter) => ({ letter }))
-    : G.state.racks[0].map((letter) => ({ letter }));
+  const rackPlayer = G.mode === 'online'
+    ? online.myPlayer
+    : (humanTurn() || G.mode === 'pass' ? G.state.currentPlayer : 0);
+  // Online state contains both racks for deterministic sync, but the honest
+  // interface deliberately reads and renders only this phone's seat.
+  rackView = G.state.racks[rackPlayer].map((letter) => ({ letter }));
 }
 
 function renderRack() {
@@ -177,7 +208,20 @@ function renderStatus() {
   if (!humanTurn()) {
     play.disabled = true;
     play.textContent = 'PLAY';
-    msg.textContent = 'SKIP is reading the lake…';
+    if (G.mode === 'online') {
+      const opp = online.match.opponents()[0] || {};
+      if (onlineAbandoned || opp.left) {
+        msg.textContent = `${opp.name || 'Your friend'} left the table.`;
+      } else if (pollErrors >= 3) {
+        msg.textContent = 'The connection wandered off Church Street — hanging tight…';
+      } else {
+        msg.textContent = opp.away
+          ? `${opp.name || 'Your friend'} stepped away…`
+          : `Waiting on ${opp.name || 'your friend'}…`;
+      }
+    } else {
+      msg.textContent = 'SKIP is reading the lake…';
+    }
     return;
   }
   if (pending.length === 0) {
@@ -212,13 +256,20 @@ function renderStatus() {
 function narrateLast() {
   const last = G.state.lastMove;
   if (!last || last.player === G.state.currentPlayer) return '';
-  const who = playerName(last.player);
+  // Online names come from the network; this string is later inserted as
+  // markup only so the trusted word/score emphasis can remain.
+  const who = escapeHtml(playerName(last.player));
   if (last.type === 'place') {
     const best = last.words.slice().sort((a, b) => b.score - a.score)[0];
-    return `${who} played <b>${best.word}</b> for ${last.score}${last.fullBucket ? ' — FULL BUCKET! 🪣' : ''}. Your move, ${playerName(G.state.currentPlayer)}.`;
+    const next = escapeHtml(playerName(G.state.currentPlayer));
+    return `${who} played <b>${best.word}</b> for ${last.score}${last.fullBucket ? ' — FULL BUCKET! 🪣' : ''}. Your move, ${next}.`;
   }
   if (last.type === 'exchange') return `${who} swapped ${last.count} tile${last.count === 1 ? '' : 's'}.`;
   return `${who} passed.`;
+}
+
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"']/g, (char) => `&#${char.charCodeAt(0)};`);
 }
 
 function render(fx = {}) {
@@ -460,6 +511,7 @@ document.addEventListener('pointerdown', (e) => {
 /* ---------------------------------------------------------------- moves */
 
 function doMove(move) {
+  if (G.mode === 'online' && !humanTurn()) return;
   const mover = G.state.currentPlayer;
   let result = null;
   try {
@@ -473,6 +525,10 @@ function doMove(move) {
   save();
   pending = [];
   passArmed = false;
+  if (G.mode === 'online') {
+    syncRack();
+    pushOnline(G.state);
+  }
 
   if (G.state.gameOver) {
     handRevealed = true;
@@ -486,7 +542,7 @@ function doMove(move) {
     render();
     setTimeout(() => showHandoff(G.state.currentPlayer), move.type === 'place' ? 850 : 350);
   } else {
-    syncRack();
+    if (G.mode !== 'online') syncRack();
     render({ slapCells: move.type === 'place' ? G.state.lastMove.cells : [] });
     if (G.state.currentPlayer === BOT) botTimer = setTimeout(botStep, 1000);
   }
@@ -645,6 +701,266 @@ function showGameOver() {
   show('gameover');
 }
 
+/* ------------------------------------------------------------- online play */
+// Two phones share one pure engine state through js/rooms.js. Seat numbers
+// are engine player numbers: createInitialState() opens with player 0, so the
+// host in seat 0 moves first and the friend who joins is player 1.
+//
+// The full state reaches both friendly-game phones for deterministic sync,
+// including racks and the seeded bag. The UI below intentionally renders only
+// this phone's rack and never exposes either rack or the bag contents elsewhere.
+
+$('hostBtn').addEventListener('click', () => openOnlinePanel('host'));
+$('joinBtn').addEventListener('click', () => openOnlinePanel('join'));
+$('opCancel').addEventListener('click', closeOnlinePanel);
+$('opGo').addEventListener('click', onlineGo);
+$('lobbyCancel').addEventListener('click', cancelLobby);
+rejoinBtn.addEventListener('click', rejoinTable);
+opCode.addEventListener('input', () => {
+  opCode.value = opCode.value.toUpperCase().replace(/[^A-Z0-9]/g, '');
+});
+[opName, opCode].forEach((el) => el.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') onlineGo();
+}));
+
+function openOnlinePanel(intent) {
+  panelIntent = intent;
+  opTitle.textContent = intent === 'host' ? 'START A TABLE' : 'JOIN A TABLE';
+  $('opGo').textContent = intent === 'host' ? 'GET A CODE' : 'TAKE YOUR SEAT';
+  opCodeWrap.classList.toggle('hidden', intent === 'host');
+  opError.classList.add('hidden');
+  opName.value = opName.value || getName();
+  onlinePanel.classList.remove('hidden');
+  (intent === 'join' && opName.value ? opCode : opName).focus();
+}
+
+function closeOnlinePanel() {
+  onlinePanel.classList.add('hidden');
+}
+
+const FRIENDLY_ROOM_ERRORS = {
+  not_found: 'No table with that code — double-check the letters.',
+  room_full: 'That table already has two wordsmiths.',
+  room_started: 'That table already has two wordsmiths.',
+  not_ready: "Online play isn't switched on yet — check back soon!",
+  offline: "Can't reach the table — are you online?",
+};
+
+function friendlyRoomError(err) {
+  if (err && err.code === 'wrong_game') {
+    return `That code belongs to ${String(err.detail || 'another Btown game').replace(/-/g, ' ')}.`;
+  }
+  return (err && FRIENDLY_ROOM_ERRORS[err.code]) || 'The tiles got scrambled — please try again.';
+}
+
+async function onlineGo() {
+  const name = opName.value.trim();
+  if (!name) {
+    opError.textContent = 'Every wordsmith needs a name.';
+    opError.classList.remove('hidden');
+    opName.focus();
+    return;
+  }
+
+  const go = $('opGo');
+  go.disabled = true;
+  opError.classList.add('hidden');
+  try {
+    if (panelIntent === 'host') {
+      const fresh = createInitialState({ numPlayers: 2, seed: newSeed() });
+      const match = await OnlineMatch.create({
+        game: GAME, name, state: fresh, seats: 2,
+      });
+      closeOnlinePanel();
+      openLobby(match);
+    } else {
+      const code = opCode.value.trim();
+      if (code.length !== 4) {
+        opError.textContent = 'The table code is 4 characters.';
+        opError.classList.remove('hidden');
+        opCode.focus();
+        return;
+      }
+      const match = await OnlineMatch.join({ game: GAME, code, name });
+      closeOnlinePanel();
+      enterOnlineGame(match);
+    }
+  } catch (err) {
+    opError.textContent = friendlyRoomError(err);
+    opError.classList.remove('hidden');
+  } finally {
+    go.disabled = false;
+  }
+}
+
+function openLobby(match) {
+  lobbyCode.textContent = match.code;
+  lobbyEl.classList.remove('hidden');
+  match.start({
+    onStatus: (status) => {
+      if (status === 'playing') {
+        lobbyEl.classList.add('hidden');
+        enterOnlineGame(match);
+      }
+    },
+    onError: () => {}, // the next waiting-room poll gets another clean try
+  });
+  lobbyEl._match = match;
+}
+
+function cancelLobby() {
+  const match = lobbyEl._match;
+  if (match) match.leave();
+  lobbyEl._match = null;
+  lobbyEl.classList.add('hidden');
+  refreshRejoin();
+}
+
+async function rejoinTable() {
+  rejoinBtn.disabled = true;
+  try {
+    const match = await OnlineMatch.resume({ game: GAME });
+    if (match.status === 'waiting') openLobby(match);
+    else enterOnlineGame(match);
+  } catch {
+    clearSession(GAME);
+    refreshRejoin();
+  } finally {
+    rejoinBtn.disabled = false;
+  }
+}
+
+function refreshRejoin() {
+  const saved = savedSession(GAME);
+  rejoinBtn.classList.toggle('hidden', !saved);
+  if (saved) rejoinBtn.textContent = `↩ REJOIN YOUR TABLE (${saved.code})`;
+}
+
+function enterOnlineGame(match) {
+  clearTimeout(botTimer);
+  online = { match, myPlayer: match.seat };
+  onlineAbandoned = false;
+  pollErrors = 0;
+  G = { mode: 'online', state: match.state };
+  handRevealed = true;
+  buildBoard();
+  applyOnlineState(match.state);
+  onlinePanel.classList.add('hidden');
+  lobbyEl.classList.add('hidden');
+  lobbyEl._match = null;
+  match.start({
+    onState: onRemoteState,
+    onStatus: onRemoteStatus,
+    onPresence: onRemotePresence,
+    onError: onRoomPollError,
+  });
+  if (match.status === 'over' && !G.state.gameOver) onRemoteStatus('over');
+}
+
+/** Cold repaint handles opponent moves, refreshes, conflicts, and rematches. */
+function applyOnlineState(newState) {
+  if (!online) return;
+  if (drag) endDragCleanup();
+  pending = [];
+  selectedSlot = null;
+  pendingBlankDrop = null;
+  passArmed = false;
+  swapPick = new Set();
+  $('blankPicker').classList.add('hidden');
+  $('swapOverlay').classList.add('hidden');
+  G.state = newState;
+  handRevealed = true;
+  syncRack();
+  if (newState.gameOver) showGameOver();
+  else {
+    show('game');
+    render();
+  }
+}
+
+function onRemoteState(newState) {
+  onlineAbandoned = false;
+  pollErrors = 0;
+  applyOnlineState(newState);
+}
+
+function onRemoteStatus(status) {
+  if (status !== 'over' || G.state.gameOver) return;
+  onlineAbandoned = true;
+  pending = [];
+  selectedSlot = null;
+  syncRack();
+  show('game');
+  render();
+}
+
+function onRemotePresence(opponents) {
+  const opp = opponents[0];
+  if (opp?.left && !G.state.gameOver) onlineAbandoned = true;
+  $('againBtn').disabled = Boolean(opp?.left);
+  if (!G.state.gameOver) renderStatus();
+}
+
+function onRoomPollError(err) {
+  if (err && err.code === 'not_found') {
+    online.match.stop();
+    clearSession(GAME);
+    online = null;
+    G = null;
+    show('menu');
+    refreshRejoin();
+    return;
+  }
+  pollErrors++;
+  if (G && !G.state.gameOver) renderStatus();
+}
+
+async function pushOnline(newState) {
+  if (!online) return;
+  const over = getStatus(newState).status === 'over';
+  try {
+    await online.match.push(newState, { over });
+    pollErrors = 0;
+    if (G?.state === newState && !newState.gameOver) renderStatus();
+  } catch (err) {
+    if (err && err.code === 'version_conflict') {
+      applyOnlineState(online.match.state);
+      return;
+    }
+    setTimeout(async () => {
+      if (!online || G?.state !== newState) return;
+      try {
+        await online.match.push(newState, { over });
+        pollErrors = 0;
+      } catch (retryErr) {
+        if (retryErr?.code === 'version_conflict') applyOnlineState(online.match.state);
+        else onRoomPollError(retryErr);
+      }
+    }, 1500);
+  }
+}
+
+async function onlineRematch() {
+  if (!online || !G.state.gameOver) return;
+  $('againBtn').disabled = true;
+  const fresh = createInitialState({ numPlayers: 2, seed: newSeed() });
+  applyOnlineState(fresh);
+  try {
+    await online.match.push(fresh, {});
+    pollErrors = 0;
+    render();
+  } catch (err) {
+    if (err && err.code === 'version_conflict') {
+      applyOnlineState(online.match.state);
+    } else {
+      onRoomPollError(err);
+      applyOnlineState(online.match.state);
+    }
+  } finally {
+    $('againBtn').disabled = false;
+  }
+}
+
 /* ---------------------------------------------------------------- menu */
 
 $('botBtn').addEventListener('click', () => startGame('bot', 2));
@@ -678,15 +994,55 @@ function goMenu() {
   $('swapOverlay').classList.add('hidden');
   $('resumeBtn').classList.toggle('hidden', !loadSave());
   show('menu');
+  refreshRejoin();
 }
 
-$('homeBtn').addEventListener('click', goMenu);
-$('menuBtn').addEventListener('click', goMenu);
-$('againBtn').addEventListener('click', () => startGame(G.mode, G.state.numPlayers));
+function leaveOnlineToMenu() {
+  if (online) {
+    online.match.leave();
+    online = null;
+  }
+  G = null;
+  $('homeBtn').dataset.armed = '';
+  $('homeBtn').textContent = '🏠';
+  goMenu();
+}
+
+function requestHome() {
+  if (!online) {
+    goMenu();
+    return;
+  }
+  const home = $('homeBtn');
+  if (home.dataset.armed !== '1') {
+    home.dataset.armed = '1';
+    home.textContent = '×';
+    home.setAttribute('aria-label', 'Tap again to leave the online table');
+    setTimeout(() => {
+      home.dataset.armed = '';
+      home.textContent = '🏠';
+      home.setAttribute('aria-label', 'Back to menu');
+    }, 2500);
+    return;
+  }
+  leaveOnlineToMenu();
+}
+
+$('homeBtn').addEventListener('click', requestHome);
+$('menuBtn').addEventListener('click', () => {
+  if (online) leaveOnlineToMenu();
+  else goMenu();
+});
+$('againBtn').addEventListener('click', () => {
+  if (online) onlineRematch();
+  else startGame(G.mode, G.state.numPlayers);
+});
 $('helpBtn').addEventListener('click', () => $('helpOverlay').classList.remove('hidden'));
 
 document.querySelectorAll('.overlay').forEach((ov) => {
-  if (ov.id === 'dictOverlay') return; // only its TRY AGAIN button closes it
+  // Online setup/lobby have explicit cancel actions; hiding the lobby without
+  // leaving would strand a live polling room behind the menu.
+  if (['dictOverlay', 'onlinePanel', 'lobby'].includes(ov.id)) return;
   ov.addEventListener('click', (e) => {
     if (e.target !== ov) return;
     if (ov.id === 'blankPicker') pendingBlankDrop = null;
