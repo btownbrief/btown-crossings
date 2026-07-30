@@ -69,6 +69,7 @@ export function createRooms() {
 
     room_join({ p_code, p_game, p_name, p_player, p_token }) {
       checkIdentity(p_player, p_token);
+      if (!/^[a-z0-9-]{1,40}$/.test(p_game ?? '')) fail('bad_game');
       const r = byCode(p_code);
       if (!r) fail('not_found');
       if (r.game !== p_game) fail(`wrong_game:${r.game}`);
@@ -105,6 +106,7 @@ export function createRooms() {
       const seat = seatOf(r, p_token);
       if (seat < 0) fail('not_seated');
       if (r.status === 'waiting') fail('not_started');
+      if (r.seats.some((s) => s.left)) fail('opponent_left');
       if (r.version !== (p_version ?? -1)) fail('version_conflict');
       r.state = p_state;
       r.version += 1;
@@ -120,6 +122,7 @@ export function createRooms() {
       if (seat < 0) fail('not_seated');
       r.seats[seat].left = true;
       r.status = 'over';
+      r.version += 1; // any in-flight push now loses its version race
       return { ok: true };
     },
   };

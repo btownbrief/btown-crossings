@@ -199,6 +199,10 @@ export class OnlineMatch {
 
   async _fetch() {
     const res = await rpc('room_get', { p_room: this.roomId, p_token: deviceToken() });
+    // Overlapping requests (poll vs. conflict refetch) can resolve out of
+    // order; a room's version only ever grows, so an older response must
+    // never overwrite a newer state.
+    if (res.version < this.version) return res;
     const statusChanged = res.status !== this.status;
     const versionChanged = res.version !== this.version;
     this.state = res.state;
@@ -206,6 +210,7 @@ export class OnlineMatch {
     this.version = res.version;
     this.seats = res.seats;
     this.now = res.now;
+    if (this._stopped) return res; // stop() mid-flight: keep state, skip callbacks
     if (versionChanged && this._cb.onState) this._cb.onState(this.state, this);
     if (statusChanged && this._cb.onStatus) this._cb.onStatus(this.status, this);
     if (this._cb.onPresence) this._cb.onPresence(this.opponents(), this);
@@ -219,12 +224,20 @@ export class OnlineMatch {
     this._cb = callbacks;
     this._stopped = false;
     const gen = (this._gen = (this._gen || 0) + 1);
+    // Exactly ONE pending timer at any moment: every (re)schedule goes
+    // through here, and every tick clears whatever else was pending, so a
+    // visibility change during a slow fetch can't fork a second loop.
+    const schedule = (ms) => {
+      clearTimeout(this._timer);
+      this._timer = setTimeout(tick, ms);
+    };
     const tick = async () => {
       if (this._stopped || gen !== this._gen) return;
+      clearTimeout(this._timer);
       if (this._inFlight) {
         // start() was called from inside a poll callback (lobby → game):
         // the old fetch is still settling — come back, don't die.
-        this._timer = setTimeout(tick, 50);
+        schedule(50);
         return;
       }
       this._inFlight = true;
@@ -232,17 +245,16 @@ export class OnlineMatch {
         await this._fetch();
       } catch (err) {
         // A vanished room means the other side left long ago — surface it.
-        if (this._cb.onError) this._cb.onError(err, this);
+        if (!this._stopped && gen === this._gen && this._cb.onError) this._cb.onError(err, this);
       } finally {
         this._inFlight = false;
       }
       if (!this._stopped && gen === this._gen) {
-        this._timer = setTimeout(tick, document.hidden ? POLL_HIDDEN_MS : POLL_VISIBLE_MS);
+        schedule(document.hidden ? POLL_HIDDEN_MS : POLL_VISIBLE_MS);
       }
     };
     this._onVis = () => {
       if (!document.hidden && !this._stopped && gen === this._gen) {
-        clearTimeout(this._timer);
         tick();
       }
     };
