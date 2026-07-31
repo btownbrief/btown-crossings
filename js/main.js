@@ -10,10 +10,12 @@ import {
 } from './engine.js';
 import { buildLexicon, chooseMove } from './bot.js';
 import { OnlineMatch, savedSession, clearSession, getName } from './rooms.js';
+import { sound } from './audio.js';
 
 const SAVE_KEY = 'btown-crossings-save-v1';
 const GAME = 'btown-crossings';
 const BOT = 1; // in bot mode, player 0 is the human, player 1 is SKIP
+const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
 
 const $ = (id) => document.getElementById(id);
 const screens = { menu: $('menu'), handoff: $('handoff'), game: $('game'), gameover: $('gameover') };
@@ -36,12 +38,20 @@ let handRevealed = true;
 let selectedSlot = null;     // rack tile picked by tap, waiting for a cell
 let pendingBlankDrop = null; // { slot, row, col } waiting on the letter picker
 let botTimer = null;
+let handoffTimer = null;
+let gameOverTimer = null;
 let passArmed = false;
 let cellEls = [];
 let online = null;    // { match, myPlayer } while seated at an online table
 let onlineAbandoned = false;
 let panelIntent = 'host';
 let pollErrors = 0;
+let lastTransitionKey = '';
+let suppressNextOnlineEffect = false;
+let effectRun = 0;
+let scoreRaf = 0;
+let invalidTimer = null;
+const effectTimers = new Set();
 
 const newSeed = () => (Math.random() * 2 ** 31) | 0;
 const isWord = (w) => dict !== null && dict.has(w);
@@ -69,6 +79,148 @@ function humanTurn() {
 
 function show(name) {
   for (const key of Object.keys(screens)) screens[key].classList.toggle('hidden', key !== name);
+}
+
+function transitionKey(state) {
+  if (!state) return '';
+  const last = state.lastMove;
+  return JSON.stringify({
+    last,
+    scores: state.scores,
+    currentPlayer: state.currentPlayer,
+    passStreak: state.passStreak,
+    bag: state.bag.length,
+    rng: state.rng,
+    gameOver: state.gameOver,
+  });
+}
+
+function scheduleEffect(fn, delay) {
+  const run = effectRun;
+  const timer = setTimeout(() => {
+    effectTimers.delete(timer);
+    if (run === effectRun) fn();
+  }, delay);
+  effectTimers.add(timer);
+  return timer;
+}
+
+function clearInvalidFeedback() {
+  clearTimeout(invalidTimer);
+  invalidTimer = null;
+  $('board').classList.remove('invalid-pulse');
+  cellEls.forEach((cell) => cell.querySelector('.btile')?.classList.remove('invalid'));
+}
+
+function clearEffects({ stopSound = false } = {}) {
+  effectRun++;
+  for (const timer of effectTimers) clearTimeout(timer);
+  effectTimers.clear();
+  if (scoreRaf) cancelAnimationFrame(scoreRaf);
+  scoreRaf = 0;
+  clearInvalidFeedback();
+  $('fxLayer').replaceChildren();
+  $('board').classList.remove('word-impact');
+  cellEls.forEach((cell) => cell.classList.remove('premium-fired'));
+  if (stopSound) sound.stop();
+}
+
+function orderedCells(cells) {
+  const ordered = cells.slice();
+  const rows = new Set(ordered.map((k) => Math.floor(k / BOARD_SIZE)));
+  const cols = new Set(ordered.map((k) => k % BOARD_SIZE));
+  if (rows.size === 1) ordered.sort((a, b) => (a % BOARD_SIZE) - (b % BOARD_SIZE));
+  else if (cols.size === 1) ordered.sort((a, b) => Math.floor(a / BOARD_SIZE) - Math.floor(b / BOARD_SIZE));
+  return ordered;
+}
+
+function placementFx(cells) {
+  const cascadeCells = orderedCells(cells || []);
+  return {
+    cascadeCells,
+    premiumCells: cascadeCells.filter((k) => PREMIUMS[k]),
+  };
+}
+
+function showInvalidFeedback() {
+  clearInvalidFeedback();
+  const board = $('board');
+  board.classList.add('invalid-pulse');
+  pending.forEach((tile) => {
+    cellEls[idx(tile.row, tile.col)]?.querySelector('.btile')?.classList.add('invalid');
+  });
+  invalidTimer = setTimeout(clearInvalidFeedback, 420);
+}
+
+function showScoreFloat(score, cells) {
+  const rects = cells.map((k) => cellEls[k]?.getBoundingClientRect()).filter(Boolean);
+  if (rects.length === 0) return;
+  const left = (Math.min(...rects.map((r) => r.left)) + Math.max(...rects.map((r) => r.right))) / 2;
+  const top = Math.min(...rects.map((r) => r.top));
+  const callout = document.createElement('div');
+  callout.className = 'score-float';
+  callout.textContent = `+${score}`;
+  callout.style.left = `${left}px`;
+  callout.style.top = `${top}px`;
+  $('fxLayer').appendChild(callout);
+  scheduleEffect(() => callout.remove(), 900);
+}
+
+function showFullBucket(cells) {
+  const banner = document.createElement('div');
+  banner.className = 'bucket-banner';
+  banner.innerHTML = '<strong>FULL BUCKET 🪣</strong><span>All seven tiles · +40</span>';
+  const wave = document.createElement('div');
+  wave.className = 'bucket-wave';
+  for (const [i, k] of cells.slice(0, 7).entries()) {
+    const tile = document.createElement('i');
+    tile.textContent = G.state.board[k]?.letter || '';
+    tile.style.setProperty('--wave-delay', `${i * 55}ms`);
+    wave.appendChild(tile);
+  }
+  banner.appendChild(wave);
+  $('fxLayer').appendChild(banner);
+  scheduleEffect(() => banner.remove(), 1250);
+}
+
+function presentPlacement(lastMove, result = null) {
+  clearEffects({ stopSound: true });
+  const cells = orderedCells(lastMove.cells || []);
+  $('board').classList.add('word-impact');
+  // Reapply the landing classes after clearEffects removed only stale effects.
+  cells.forEach((k, i) => {
+    const tile = cellEls[k]?.querySelector('.btile');
+    if (tile) {
+      tile.classList.add('land');
+      tile.style.setProperty('--land-delay', `${i * 40}ms`);
+    }
+    if (PREMIUMS[k]) cellEls[k]?.classList.add('premium-fired');
+  });
+  const wordCells = result?.words?.slice().sort((a, b) => b.cells.length - a.cells.length)[0]?.cells || cells;
+  showScoreFloat(lastMove.score, wordCells);
+  const words = lastMove.words.map((word) => word.word).join(' + ');
+  $('msg').className = 'good';
+  $('msg').textContent = `${playerName(lastMove.player)} played ${words} for ${lastMove.score}${lastMove.fullBucket ? ' — FULL BUCKET! 🪣' : ''}`;
+  if (lastMove.fullBucket) {
+    showFullBucket(cells);
+    sound.fullBucket(lastMove.score);
+  } else {
+    sound.wordScore(lastMove.score);
+  }
+  scheduleEffect(() => {
+    $('board').classList.remove('word-impact');
+    cellEls.forEach((cell) => cell.classList.remove('premium-fired'));
+  }, 700);
+  scheduleEffect(() => {
+    if (G && !G.state.gameOver && !screens.game.classList.contains('hidden')) renderStatus();
+  }, 900);
+}
+
+function updateMuteButton() {
+  const mute = $('mute');
+  mute.textContent = sound.muted ? '🔇' : '🔊';
+  mute.setAttribute('aria-pressed', String(sound.muted));
+  mute.setAttribute('aria-label', sound.muted ? 'Unmute sound' : 'Mute sound');
 }
 
 /* ---------------------------------------------------------------- save */
@@ -122,17 +274,23 @@ function tileEl(letter, blank, cls) {
 function renderBoard(fx = {}) {
   const lastCells = new Set(
     pending.length === 0 && G.state.lastMove?.type === 'place' ? G.state.lastMove.cells : []);
+  const cascadeOrder = new Map((fx.cascadeCells || []).map((k, i) => [k, i]));
+  const premiumCells = new Set(fx.premiumCells || []);
   for (let k = 0; k < cellEls.length; k++) {
     const cell = cellEls[k];
     cell.querySelector('.btile')?.remove();
-    cell.classList.remove('drop-ok');
+    cell.classList.remove('drop-ok', 'premium-fired');
     const committed = G.state.board[k];
     const pend = pending.find((p) => idx(p.row, p.col) === k);
     if (committed) {
       const el = tileEl(committed.letter, committed.blank, 'btile');
       if (lastCells.has(k)) el.classList.add('lastplay');
-      if (fx.slapCells?.includes(k)) el.classList.add('slap');
+      if (cascadeOrder.has(k)) {
+        el.classList.add('land');
+        el.style.setProperty('--land-delay', `${cascadeOrder.get(k) * 40}ms`);
+      }
       cell.appendChild(el);
+      if (premiumCells.has(k)) cell.classList.add('premium-fired');
     } else if (pend && handRevealed) {
       const el = tileEl(pend.as, pend.blank, 'btile pending');
       el.addEventListener('pointerdown', (e) => startDrag(e, el, { type: 'pending', pend }));
@@ -245,7 +403,9 @@ function renderStatus() {
     const names = result.words.map((w) => w.word).join(' + ');
     msg.textContent = `${names} for ${result.score}${result.fullBucket ? ' — FULL BUCKET! 🪣' : ''}`;
   } catch (e) {
-    play.disabled = true;
+    // Keep PLAY tappable so an explicit invalid attempt can receive local,
+    // useful feedback instead of leaving the player with inert plain text.
+    play.disabled = false;
     play.textContent = 'PLAY';
     msg.className = 'bad';
     msg.textContent = e.message;
@@ -335,6 +495,7 @@ function startDrag(e, el, source) {
   if (drag) endDragCleanup();
   if (!humanTurn() || G.state.gameOver) return;
   e.preventDefault();
+  sound.tileClick();
   const slot = source.type === 'rack' ? source.slot : source.pend.slot;
   const letter = source.type === 'rack'
     ? (slot.letter === BLANK ? '★' : slot.letter)
@@ -419,6 +580,7 @@ function onDragEnd(e) {
     if (source.type === 'pending') {
       source.pend.row = cell.row;
       source.pend.col = cell.col;
+      sound.tilePlace();
     } else {
       placeFromRack(slot, cell.row, cell.col);
       return; // placeFromRack renders (or opens the blank picker)
@@ -438,6 +600,7 @@ function placeFromRack(slot, row, col) {
     return;
   }
   pending.push({ slot, letter: slot.letter, as: slot.letter, blank: false, row, col });
+  sound.tilePlace();
   render();
 }
 
@@ -502,6 +665,7 @@ document.addEventListener('pointerdown', (e) => {
       pending.push({ slot, letter: BLANK, as: L, blank: true, row, col });
       pendingBlankDrop = null;
       $('blankPicker').classList.add('hidden');
+      sound.tilePlace();
       render();
     });
     grid.appendChild(btn);
@@ -512,7 +676,6 @@ document.addEventListener('pointerdown', (e) => {
 
 function doMove(move) {
   if (G.mode === 'online' && !humanTurn()) return;
-  const mover = G.state.currentPlayer;
   let result = null;
   try {
     if (move.type === 'place') result = checkPlacement(G.state, move, isWord);
@@ -520,30 +683,63 @@ function doMove(move) {
   } catch (e) {
     $('msg').className = 'bad';
     $('msg').textContent = e.message;
+    showInvalidFeedback();
     return;
   }
+  clearTimeout(handoffTimer);
+  clearTimeout(gameOverTimer);
+  lastTransitionKey = transitionKey(G.state);
   save();
   pending = [];
   passArmed = false;
+
   if (G.mode === 'online') {
+    const confirmedState = G.state;
     syncRack();
-    pushOnline(G.state);
+    clearEffects({ stopSound: true });
+    render();
+    pushOnline(confirmedState, () => {
+      if (!G || G.state !== confirmedState) return;
+      const fx = result ? placementFx(confirmedState.lastMove.cells) : {};
+      render(fx);
+      if (result) presentPlacement(confirmedState.lastMove, result);
+      if (confirmedState.gameOver) {
+        gameOverTimer = setTimeout(
+          () => showGameOver(),
+          move.type === 'place' ? 1100 : 400
+        );
+      }
+    });
+    return;
   }
 
+  const fx = result ? placementFx(G.state.lastMove.cells) : {};
   if (G.state.gameOver) {
     handRevealed = true;
-    render({ slapCells: result ? G.state.lastMove.cells : [] });
-    setTimeout(() => showGameOver(), move.type === 'place' ? 1100 : 400);
+    render(fx);
+    if (result) presentPlacement(G.state.lastMove, result);
+    else clearEffects({ stopSound: true });
+    gameOverTimer = setTimeout(
+      () => showGameOver(),
+      move.type === 'place' ? 1100 : 400
+    );
     return;
   }
 
   if (G.mode === 'pass') {
     handRevealed = false; // curtain down before the next player's rack shows
-    render();
-    setTimeout(() => showHandoff(G.state.currentPlayer), move.type === 'place' ? 850 : 350);
+    render(fx);
+    if (result) presentPlacement(G.state.lastMove, result);
+    else clearEffects({ stopSound: true });
+    handoffTimer = setTimeout(
+      () => showHandoff(G.state.currentPlayer),
+      move.type === 'place' ? 850 : 350
+    );
   } else {
-    if (G.mode !== 'online') syncRack();
-    render({ slapCells: move.type === 'place' ? G.state.lastMove.cells : [] });
+    syncRack();
+    render(fx);
+    if (result) presentPlacement(G.state.lastMove, result);
+    else clearEffects({ stopSound: true });
     if (G.state.currentPlayer === BOT) botTimer = setTimeout(botStep, 1000);
   }
 }
@@ -629,7 +825,11 @@ function botStep() {
 
 function startGame(mode, numPlayers) {
   clearTimeout(botTimer);
+  clearTimeout(handoffTimer);
+  clearTimeout(gameOverTimer);
+  clearEffects({ stopSound: true });
   G = { mode, state: createInitialState({ numPlayers, seed: newSeed() }) };
+  lastTransitionKey = transitionKey(G.state);
   save();
   buildBoard();
   if (mode === 'pass') {
@@ -644,6 +844,7 @@ function startGame(mode, numPlayers) {
 }
 
 function showHandoff(player) {
+  clearEffects({ stopSound: true });
   handRevealed = false;
   $('handoffTitle').textContent = 'Pass the phone to ' + playerName(player);
   const last = narrateLast();
@@ -662,30 +863,112 @@ const WIN_LINES = [
   'That board reads better than the Sunday paper.',
   'Sweeter than a creemee on Church Street.',
   'Words that good deserve a booth at the farmers market.',
-  'Somewhere on the lake, SKIP just dipped his sails in respect.',
+  'A fine day for words in the Queen City.',
 ];
 
-function showGameOver() {
+const BOT_LINES = {
+  winClose: [
+    'SKIP tips his cap. “One more crossing and you might’ve had me.”',
+    'SKIP whistles low. “That was close enough to rock the boat.”',
+  ],
+  winDecisive: [
+    'SKIP dips his sails in respect. “You owned the board today.”',
+    'SKIP nods toward shore. “Fair and square, wordsmith.”',
+  ],
+  loseClose: [
+    'SKIP grins. “Only a few points in it. Run it back?”',
+    'SKIP steadies the tiller. “That one could’ve gone either way.”',
+  ],
+  loseDecisive: [
+    'SKIP grins. “The old skipper still knows these crossings.”',
+    'SKIP taps the board. “Plenty of lake left for a rematch.”',
+  ],
+};
+
+let previousResolutionLine = '';
+
+function pickResolutionLine(lines) {
+  const choices = lines.filter((line) => line !== previousResolutionLine);
+  const line = choices[(Math.random() * choices.length) | 0] || lines[0];
+  previousResolutionLine = line;
+  return line;
+}
+
+function localOutcome(status) {
+  if (status.winners.length > 1) return 'draw';
+  if (G.mode === 'bot') return status.winners.includes(0) ? 'win' : 'lose';
+  if (G.mode === 'online') return status.winners.includes(online.myPlayer) ? 'win' : 'lose';
+  return 'win';
+}
+
+function animateFinalScores(rows) {
+  if (reducedMotion.matches) return;
+  const run = effectRun;
+  const start = performance.now();
+  const duration = 650;
+  const frame = (now) => {
+    if (run !== effectRun) return;
+    const progress = Math.min(1, (now - start) / duration);
+    const eased = 1 - (1 - progress) ** 3;
+    for (const row of rows) {
+      const score = Number(row.dataset.score);
+      row.textContent = Math.round(score * eased);
+    }
+    if (progress < 1) scoreRaf = requestAnimationFrame(frame);
+    else scoreRaf = 0;
+  };
+  scoreRaf = requestAnimationFrame(frame);
+}
+
+function showGameOver({ celebrate = true } = {}) {
   clearTimeout(botTimer);
+  clearTimeout(gameOverTimer);
+  clearEffects({ stopSound: true });
   save(); // clears the save — game's done
   const st = getStatus(G.state);
   const names = st.winners.map(playerName);
+  const outcome = localOutcome(st);
 
   $('go-title').textContent = st.winners.length > 1
     ? 'A TIE AT THE CROSSING'
     : (G.mode === 'bot' && st.winners[0] === BOT ? 'SKIP TAKES IT ⛵' : names[0].toUpperCase() + ' WINS! 🍁');
 
-  let line = '';
-  if (st.reason === 'passes') line = 'Two full rounds of passes — the tiles have spoken. ';
-  else line = `${playerName(G.state.outPlayer)} went out and collected the leftovers. `;
-  if (st.winners.length > 1) line += `${names.join(' & ')} split the maple candy.`;
-  else if (G.mode === 'bot' && st.winners[0] === BOT) line += 'The old skipper knows his way around a board. Demand a rematch.';
-  else line += WIN_LINES[(Math.random() * WIN_LINES.length) | 0];
+  const reason = st.reason === 'passes'
+    ? 'Two full rounds of passes — the tiles have spoken. '
+    : `${playerName(G.state.outPlayer)} went out and collected the leftovers. `;
+  let reaction;
+  if (st.winners.length > 1) {
+    reaction = `${names.join(' & ')} split the maple candy.`;
+  } else if (G.mode === 'bot') {
+    const margin = Math.abs(G.state.scores[0] - G.state.scores[BOT]);
+    const closeness = margin <= 12 ? 'Close' : 'Decisive';
+    reaction = pickResolutionLine(BOT_LINES[outcome + closeness]);
+  } else if (G.mode === 'online') {
+    reaction = outcome === 'win'
+      ? 'You found the last crossing. Your friend owes you a creemee.'
+      : 'Your friend found the crossing first. The rematch button is right there.';
+  } else {
+    reaction = pickResolutionLine(WIN_LINES);
+  }
+  const line = reason + reaction;
   $('go-line').textContent = line;
+
+  const card = $('go-card');
+  card.classList.remove('result-win', 'result-lose', 'result-draw', 'celebrating');
+  card.classList.add(`result-${outcome}`);
+  if (celebrate) card.classList.add('celebrating');
+  const lights = $('go-lights');
+  lights.replaceChildren();
+  for (let i = 0; i < 12; i++) {
+    const light = document.createElement('i');
+    light.style.setProperty('--light-delay', `${i * 70}ms`);
+    lights.appendChild(light);
+  }
 
   const table = $('go-table');
   table.innerHTML = '';
   const order = [...Array(G.state.numPlayers).keys()].sort((a, b) => G.state.scores[b] - G.state.scores[a]);
+  const scoreEls = [];
   for (const p of order) {
     const adj = G.state.adjustments[p];
     const row = document.createElement('div');
@@ -695,10 +978,21 @@ function showGameOver() {
     row.querySelector('.adj').textContent =
       (adj.leftover ? `−${adj.leftover} left over` : '') +
       (adj.bonus ? `${adj.leftover ? ' · ' : ''}+${adj.bonus} collected` : '');
-    row.querySelector('.fin').textContent = G.state.scores[p];
+    const scoreEl = row.querySelector('.fin');
+    scoreEl.dataset.score = G.state.scores[p];
+    scoreEl.textContent = celebrate && !reducedMotion.matches ? '0' : G.state.scores[p];
+    scoreEl.setAttribute('aria-label', `${G.state.scores[p]} points`);
+    scoreEls.push(scoreEl);
     table.appendChild(row);
   }
   show('gameover');
+  if (celebrate) {
+    if (outcome === 'draw') sound.draw();
+    else if (outcome === 'win') sound.win();
+    else sound.lose();
+    animateFinalScores(scoreEls);
+  }
+  $('againBtn').focus({ preventScroll: true });
 }
 
 /* ------------------------------------------------------------- online play */
@@ -844,6 +1138,9 @@ function refreshRejoin() {
 
 function enterOnlineGame(match) {
   clearTimeout(botTimer);
+  clearTimeout(handoffTimer);
+  clearTimeout(gameOverTimer);
+  clearEffects({ stopSound: true });
   online = { match, myPlayer: match.seat };
   onlineAbandoned = false;
   pollErrors = 0;
@@ -863,9 +1160,11 @@ function enterOnlineGame(match) {
   if (match.status === 'over' && !G.state.gameOver) onRemoteStatus('over');
 }
 
-/** Cold repaint handles opponent moves, refreshes, conflicts, and rematches. */
-function applyOnlineState(newState) {
+/** Online repaints are cold unless onRemoteState marks one fresh transition. */
+function applyOnlineState(newState, { transition = false, result = null } = {}) {
   if (!online) return;
+  clearTimeout(gameOverTimer);
+  clearEffects({ stopSound: true });
   if (drag) endDragCleanup();
   pending = [];
   selectedSlot = null;
@@ -875,19 +1174,48 @@ function applyOnlineState(newState) {
   $('blankPicker').classList.add('hidden');
   $('swapOverlay').classList.add('hidden');
   G.state = newState;
+  lastTransitionKey = transitionKey(newState);
   handRevealed = true;
   syncRack();
-  if (newState.gameOver) showGameOver();
-  else {
-    show('game');
-    render();
+  const last = transition ? newState.lastMove : null;
+  const fx = last?.type === 'place' ? placementFx(last.cells) : {};
+  if (newState.gameOver && !transition) {
+    showGameOver({ celebrate: false });
+    return;
+  }
+  show('game');
+  render(fx);
+  if (last?.type === 'place') presentPlacement(last, result);
+  if (newState.gameOver) {
+    gameOverTimer = setTimeout(
+      () => showGameOver(),
+      last?.type === 'place' ? 1100 : 400
+    );
   }
 }
 
 function onRemoteState(newState) {
+  const wasReconnecting = pollErrors > 0;
+  const transition = transitionKey(newState) !== lastTransitionKey &&
+    !wasReconnecting &&
+    !suppressNextOnlineEffect &&
+    document.visibilityState === 'visible';
+  let result = null;
+  if (transition && newState.lastMove?.type === 'place' && dict) {
+    const tiles = newState.lastMove.cells.map((k) => ({
+      row: Math.floor(k / BOARD_SIZE),
+      col: k % BOARD_SIZE,
+      letter: newState.board[k].letter,
+      blank: newState.board[k].blank,
+    }));
+    try {
+      result = checkPlacement(G.state, { type: 'place', tiles }, isWord);
+    } catch { /* a skipped room version still gets a safe new-tile anchor */ }
+  }
   onlineAbandoned = false;
   pollErrors = 0;
-  applyOnlineState(newState);
+  suppressNextOnlineEffect = false;
+  applyOnlineState(newState, { transition, result });
 }
 
 function onRemoteStatus(status) {
@@ -902,6 +1230,7 @@ function onRemoteStatus(status) {
 
 function onRemotePresence(opponents) {
   pollErrors = 0; // this callback only fires on a successful poll
+  if (document.visibilityState === 'visible') suppressNextOnlineEffect = false;
   const opp = opponents[0];
   if (opp?.left && !G.state.gameOver) onlineAbandoned = true;
   $('againBtn').disabled = Boolean(opp?.left);
@@ -922,12 +1251,19 @@ function onRoomPollError(err) {
   if (G && !G.state.gameOver) renderStatus();
 }
 
-async function pushOnline(newState) {
+async function pushOnline(newState, onConfirmed = () => {}) {
   if (!online) return;
   const over = getStatus(newState).status === 'over';
+  let presented = false;
+  const confirm = () => {
+    if (presented) return;
+    presented = true;
+    onConfirmed();
+  };
   try {
     await online.match.push(newState, { over });
     pollErrors = 0;
+    confirm();
     if (G?.state === newState && !newState.gameOver) renderStatus();
   } catch (err) {
     if (err && err.code === 'version_conflict') {
@@ -939,6 +1275,7 @@ async function pushOnline(newState) {
       try {
         await online.match.push(newState, { over });
         pollErrors = 0;
+        confirm();
       } catch (retryErr) {
         if (retryErr?.code === 'version_conflict') applyOnlineState(online.match.state);
         else onRoomPollError(retryErr);
@@ -980,7 +1317,11 @@ $('resumeBtn').addEventListener('click', () => {
   const saved = loadSave();
   if (!saved) { $('resumeBtn').classList.add('hidden'); return; }
   clearTimeout(botTimer);
+  clearTimeout(handoffTimer);
+  clearTimeout(gameOverTimer);
+  clearEffects({ stopSound: true });
   G = saved;
+  lastTransitionKey = transitionKey(G.state);
   buildBoard();
   if (G.mode === 'pass') {
     showHandoff(G.state.currentPlayer);
@@ -995,6 +1336,9 @@ $('resumeBtn').addEventListener('click', () => {
 
 function goMenu() {
   clearTimeout(botTimer);
+  clearTimeout(handoffTimer);
+  clearTimeout(gameOverTimer);
+  clearEffects({ stopSound: true });
   pending = [];
   pendingBlankDrop = null;
   $('blankPicker').classList.add('hidden');
@@ -1045,6 +1389,18 @@ $('againBtn').addEventListener('click', () => {
   else startGame(G.mode, G.state.numPlayers);
 });
 $('helpBtn').addEventListener('click', () => $('helpOverlay').classList.remove('hidden'));
+$('mute').addEventListener('click', () => {
+  sound.toggleMuted();
+  updateMuteButton();
+});
+
+document.addEventListener('pointerdown', sound.unlock, { once: true, capture: true });
+document.addEventListener('keydown', sound.unlock, { once: true, capture: true });
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'hidden') return;
+  suppressNextOnlineEffect = true;
+  clearEffects({ stopSound: true });
+});
 
 document.querySelectorAll('.overlay').forEach((ov) => {
   // Online setup/lobby have explicit cancel actions; hiding the lobby without
@@ -1060,6 +1416,7 @@ document.querySelectorAll('.overlay').forEach((ov) => {
 
 /* ---------------------------------------------------------------- boot */
 
+updateMuteButton();
 goMenu();
 
 function loadDictionary() {

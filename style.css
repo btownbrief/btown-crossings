@@ -271,10 +271,127 @@ button { font-family: inherit; cursor: pointer; }
   z-index: 2;
 }
 .btile.lastplay { box-shadow: 0 0 0 2px #7fb069 inset; }
-.btile.slap { animation: slap 0.18s ease-out; }
-@keyframes slap {
-  from { transform: scale(1.5); }
-  to { transform: scale(1); }
+.btile.land {
+  animation: tileLand 0.2s cubic-bezier(.2, .8, .3, 1) both;
+  animation-delay: var(--land-delay, 0ms);
+}
+@keyframes tileLand {
+  from { transform: translateY(-9px) scale(1.18); opacity: 0.5; }
+  70% { transform: translateY(1px) scale(0.98); opacity: 1; }
+  to { transform: none; opacity: 1; }
+}
+#board.word-impact { animation: wordImpact 0.24s ease-out; }
+@keyframes wordImpact {
+  45% { transform: scale(1.008); }
+}
+.cell.premium-fired::after {
+  content: "";
+  position: absolute;
+  inset: -2px;
+  z-index: 4;
+  pointer-events: none;
+  border: 2px solid #fff4b8;
+  border-radius: 4px;
+  box-shadow: 0 0 14px 4px rgba(255, 226, 111, 0.75);
+  animation: premiumFire 0.68s ease-out both;
+}
+@keyframes premiumFire {
+  0% { opacity: 0; transform: scale(0.72); }
+  28% { opacity: 1; transform: scale(1.08); }
+  100% { opacity: 0; transform: scale(1.2); }
+}
+.btile.invalid { animation: invalidWiggle 0.24s ease-in-out; }
+@keyframes invalidWiggle {
+  20% { transform: translateX(-3px) rotate(-2deg); }
+  40% { transform: translateX(3px) rotate(2deg); }
+  60% { transform: translateX(-2px) rotate(-1deg); }
+  80% { transform: translateX(2px) rotate(1deg); }
+}
+#board.invalid-pulse { animation: invalidPulse 0.36s ease-out; }
+@keyframes invalidPulse {
+  35% { box-shadow: 0 0 0 3px var(--bad), 0 0 18px rgba(224, 75, 64, 0.45); }
+}
+
+/* All presentation effects are decorative and can never intercept input. */
+#fxLayer {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  overflow: hidden;
+  pointer-events: none;
+}
+.score-float {
+  position: fixed;
+  transform: translate(-50%, -115%);
+  color: #fff4b8;
+  font-size: clamp(24px, 8vw, 38px);
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 3px 0 #5a3314, 0 0 14px rgba(232, 145, 45, 0.8);
+  animation: scoreFloat 0.86s ease-out both;
+}
+@keyframes scoreFloat {
+  0% { opacity: 0; transform: translate(-50%, -65%) scale(0.72); }
+  18% { opacity: 1; transform: translate(-50%, -125%) scale(1.12); }
+  75% { opacity: 1; transform: translate(-50%, -145%) scale(1); }
+  100% { opacity: 0; transform: translate(-50%, -175%) scale(0.96); }
+}
+.bucket-banner {
+  position: fixed;
+  left: 50%;
+  top: 45%;
+  width: min(88vw, 360px);
+  padding: 16px 18px 14px;
+  transform: translate(-50%, -50%);
+  color: var(--tile-ink);
+  background: linear-gradient(180deg, #fff1c7, var(--tile-bg));
+  border: 2px solid var(--accent);
+  border-radius: 18px;
+  box-shadow: 0 14px 38px rgba(0, 0, 0, 0.55), 0 0 24px rgba(232, 145, 45, 0.38);
+  text-align: center;
+  animation: bucketBanner 1.2s ease-out both;
+}
+.bucket-banner strong {
+  display: block;
+  font-size: 25px;
+  letter-spacing: 1px;
+}
+.bucket-banner > span {
+  display: block;
+  margin-top: 3px;
+  font-size: 13px;
+  font-weight: 800;
+}
+.bucket-wave {
+  display: flex;
+  justify-content: center;
+  gap: 5px;
+  margin-top: 10px;
+}
+.bucket-wave i {
+  width: 29px;
+  height: 29px;
+  display: grid;
+  place-items: center;
+  color: var(--tile-ink);
+  background: #f7e2b7;
+  border: 1px solid var(--tile-edge);
+  border-bottom-width: 3px;
+  border-radius: 5px;
+  font-size: 17px;
+  font-style: normal;
+  font-weight: 900;
+  animation: bucketWave 0.48s ease-in-out var(--wave-delay) both;
+}
+@keyframes bucketBanner {
+  0% { opacity: 0; transform: translate(-50%, -42%) scale(0.75); }
+  14%, 76% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  100% { opacity: 0; transform: translate(-50%, -55%) scale(0.98); }
+}
+@keyframes bucketWave {
+  0% { transform: translateY(8px) rotate(-4deg); opacity: 0; }
+  55% { transform: translateY(-7px) rotate(3deg); opacity: 1; }
+  100% { transform: none; opacity: 1; }
 }
 
 /* ---------------- message + controls ---------------- */
@@ -534,6 +651,8 @@ button { font-family: inherit; cursor: pointer; }
 
 /* ---------------- game over ---------------- */
 #go-card {
+  --resolution: var(--accent);
+  position: relative;
   width: 100%;
   max-width: 380px;
   background: var(--panel);
@@ -545,6 +664,45 @@ button { font-family: inherit; cursor: pointer; }
   gap: 14px;
   align-items: center;
   text-align: center;
+}
+#go-card.result-lose { --resolution: #7aa8bf; }
+#go-card.result-draw { --resolution: var(--muted); }
+#go-card.celebrating {
+  border-color: var(--resolution);
+  animation: resolutionArrive 0.48s ease-out;
+  box-shadow: 0 0 34px rgba(232, 145, 45, 0.28);
+}
+@keyframes resolutionArrive {
+  0% { transform: translateY(8px) scale(0.96); opacity: 0.65; }
+  65% { transform: translateY(-2px) scale(1.01); opacity: 1; }
+  to { transform: none; }
+}
+#go-lights {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  top: -7px;
+  display: flex;
+  justify-content: space-between;
+  pointer-events: none;
+}
+#go-lights i {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: var(--resolution);
+  border: 2px solid var(--panel);
+  opacity: 0.55;
+}
+#go-card.celebrating #go-lights i {
+  animation: churchLights 0.72s ease-in-out var(--light-delay) 3 alternate;
+}
+@keyframes churchLights {
+  to {
+    opacity: 1;
+    transform: translateY(-2px) scale(1.18);
+    box-shadow: 0 0 10px 3px var(--resolution);
+  }
 }
 #go-title { font-size: 26px; font-weight: 900; letter-spacing: 1px; }
 #go-line { font-size: 14px; color: var(--muted); line-height: 1.45; }
@@ -691,4 +849,43 @@ button { font-family: inherit; cursor: pointer; }
   color: var(--muted);
   font-size: 13px;
   line-height: 1.4;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .btile.land,
+  #board.word-impact,
+  .cell.premium-fired::after,
+  .btile.invalid,
+  #board.invalid-pulse,
+  .score-float,
+  .bucket-banner,
+  .bucket-wave i,
+  #go-card.celebrating,
+  #go-card.celebrating #go-lights i,
+  #lobbyCode {
+    animation: none;
+  }
+
+  .btile.invalid {
+    box-shadow: 0 0 0 2px var(--bad) inset;
+  }
+
+  #board.invalid-pulse {
+    box-shadow: 0 0 0 3px var(--bad);
+  }
+
+  .cell.premium-fired::after {
+    opacity: 1;
+    transform: none;
+  }
+
+  .score-float {
+    opacity: 1;
+    transform: translate(-50%, -125%);
+  }
+
+  .bucket-banner {
+    opacity: 1;
+    transform: translate(-50%, -50%);
+  }
 }

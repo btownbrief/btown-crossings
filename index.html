@@ -120,6 +120,7 @@
     <div id="topbar">
       <button id="homeBtn" class="icon-btn" aria-label="Back to menu">🏠</button>
       <div id="scoreChips"></div>
+      <button id="mute" class="icon-btn" aria-label="Mute sound" aria-pressed="false">🔊</button>
       <button id="helpBtn" class="icon-btn" aria-label="How to play">?</button>
     </div>
 
@@ -127,7 +128,7 @@
       <div id="board" aria-label="15 by 15 board"></div>
     </div>
 
-    <div id="msg"></div>
+    <div id="msg" role="status" aria-live="polite"></div>
 
     <div id="controls">
       <button id="shuffleBtn" class="ctl" aria-label="Shuffle rack">🔀</button>
@@ -204,6 +205,7 @@
   <div id="gameover" class="screen hidden">
     <div class="menu-inner">
       <div id="go-card">
+        <div id="go-lights" aria-hidden="true"></div>
         <div id="go-title"></div>
         <div id="go-line"></div>
         <div id="go-table"></div>
@@ -217,6 +219,9 @@
       </div>
     </div>
   </div>
+
+  <!-- Decorative, non-blocking game-feel effects. -->
+  <div id="fxLayer" aria-hidden="true"></div>
 
 </div>
 <script type="module" src="js/main.js"></script>
