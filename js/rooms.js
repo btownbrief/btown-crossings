@@ -131,6 +131,7 @@ export class OnlineMatch {
     this.status = session.status ?? 'waiting';
     this.version = session.version ?? 0;
     this.seats = session.seats ?? [];
+    this.maxSeats = session.maxSeats ?? null;
     this.now = session.now ?? 0;
     this._cb = {};
     this._timer = 0;
@@ -148,7 +149,7 @@ export class OnlineMatch {
     const m = new OnlineMatch(game, {
       roomId: res.room_id, code: res.code, seat: res.seat,
       state, status: 'waiting', version: 0,
-      seats: [{ seat: 0, name, left: false }],
+      seats: [{ seat: 0, name, left: false }], maxSeats: seats,
     });
     m._save();
     return m;
@@ -163,7 +164,7 @@ export class OnlineMatch {
     const m = new OnlineMatch(game, {
       roomId: res.room_id, code: String(code).trim().toUpperCase(),
       seat: res.seat, state: res.state, status: res.status,
-      version: res.version, seats: res.seats,
+      version: res.version, seats: res.seats, maxSeats: res.max_seats,
     });
     m._save();
     return m;
@@ -209,6 +210,7 @@ export class OnlineMatch {
     this.status = res.status;
     this.version = res.version;
     this.seats = res.seats;
+    this.maxSeats = res.max_seats ?? this.maxSeats;
     this.now = res.now;
     if (this._stopped) return res; // stop() mid-flight: keep state, skip callbacks
     if (versionChanged && this._cb.onState) this._cb.onState(this.state, this);
