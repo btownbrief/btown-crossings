@@ -71,6 +71,7 @@ Plain static site — no build step. `index.html` + `style.css` + ES modules in 
 | `js/engine.js` | **all** the rules, as pure functions over one JSON-serializable state object (seeded RNG lives in the state — same seed, same bag). Dictionary lookups are injected as an `isWord` function; the engine owns no data files. |
 | `js/bot.js` | SKIP's brain — trie + anchored search over words up to 8 letters, every candidate re-validated through `engine.checkPlacement`, best find wins. Decent, not optimal, on purpose. |
 | `js/main.js` | UI only: screens, drag & tap tile placement, live word/score preview, pass-the-phone handoffs, bot pacing, localStorage resume |
+| `js/leaderboard.js` | monthly leaderboard client (Supabase); vs-SKIP wins only, no accounts |
 
 The engine/UI split is deliberate: online multiplayer later just means
 syncing the engine's state object between phones. Rule logic anywhere

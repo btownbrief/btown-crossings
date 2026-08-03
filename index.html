@@ -214,6 +214,20 @@
           <button id="againBtn" class="big-btn">↻&nbsp; RUN IT BACK</button>
           <button id="menuBtn" class="chip-btn">🏠&nbsp; MENU</button>
         </div>
+        <!-- Monthly leaderboard: shown after vs-SKIP games only (see js/main.js) -->
+        <div id="lb" class="hidden">
+          <div class="lb-tabs">
+            <button class="chip-btn sel" id="lbThisBtn">🏆 This Month</button>
+            <button class="chip-btn" id="lbLastBtn">Last Month</button>
+          </div>
+          <div class="lb-status" id="lbStatus"></div>
+          <ol id="lbList"></ol>
+          <div class="lb-form hidden" id="lbForm">
+            <input id="lbNameInput" maxlength="20" placeholder="Your name" autocomplete="nickname">
+            <button class="chip-btn go" id="lbSaveBtn">SAVE</button>
+          </div>
+          <button class="chip-btn lb-rename" id="lbRenameBtn">✏️ Change name</button>
+        </div>
         <a id="brief-cta" href="https://www.btownbrief.com" target="_blank" rel="noopener">
           🗞️ The best words in town are in your inbox.<br><strong>Read the BTown Brief →</strong>
         </a>
